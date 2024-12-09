@@ -4,8 +4,7 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.datasets import VOCDetection
-from sklearn.metrics import accuracy_score
-
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 class ObjectDetectionCNN(nn.Module):
     def __init__(self):
@@ -13,63 +12,56 @@ class ObjectDetectionCNN(nn.Module):
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
+
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
         self.bn2 = nn.BatchNorm2d(64)
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
+
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
         self.bn3 = nn.BatchNorm2d(128)
         self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        self.fc1 = nn.Linear(128 * 8 * 8, 512) 
+
+        self.fc1 = nn.Linear(128 * 8 * 8, 512)
         self.dropout = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(512, 4)  
+        self.fc2 = nn.Linear(512, 4)
 
     def forward(self, x):
         x = self.pool1(torch.relu(self.bn1(self.conv1(x))))
         x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
         x = self.pool3(torch.relu(self.bn3(self.conv3(x))))
-        x = x.view(x.size(0), -1)  # Flatten
+        x = x.view(x.size(0), -1)  
         x = torch.relu(self.fc1(x))
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-
 
 def custom_collate_fn(batch):
     inputs = [item[0] for item in batch]
     targets = [item[1] for item in batch]
     return torch.stack(inputs), targets
 
-
 transform = transforms.Compose([
-    transforms.Resize((64, 64)), 
+    transforms.Resize((64, 64)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-
 dataset = VOCDetection(root='/snowy', year='2012', image_set='train', download=True, transform=transform)
-
 
 valid_data = []
 for data in dataset:
     try:
-        if len(data[1]['annotation']['object']) > 0:  
+        if len(data[1]['annotation']['object']) > 0:
             valid_data.append(data)
     except KeyError:
         continue
 
-
 dataloader = DataLoader(valid_data, batch_size=32, shuffle=True, collate_fn=custom_collate_fn)
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = ObjectDetectionCNN().to(device)
-criterion = nn.CrossEntropyLoss()  
+criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-
 
 num_epochs = 10
 for epoch in range(num_epochs):
@@ -77,7 +69,7 @@ for epoch in range(num_epochs):
     running_loss = 0.0
     for i, (inputs, targets) in enumerate(dataloader):
         inputs = inputs.to(device)
-        labels = torch.tensor([0 for _ in targets]).to(device)  
+        labels = torch.tensor([0 for _ in targets]).to(device)
 
         optimizer.zero_grad()
         outputs = model(inputs)
@@ -86,11 +78,10 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         running_loss += loss.item()
-        if i % 10 == 0:  
+        if i % 10 == 0:
             print(f"Epoch {epoch+1}/{num_epochs}, Batch {i+1}, Loss: {loss.item():.4f}")
 
 print("Training complete.")
-
 
 model.eval()
 all_preds = []
@@ -101,7 +92,7 @@ class_total = {"car": 0, "bus": 0, "pedestrian": 0, "traffic_sign": 0}
 with torch.no_grad():
     for inputs, targets in dataloader:
         inputs = inputs.to(device)
-        labels = torch.tensor([0 for _ in targets]).to(device)  
+        labels = torch.tensor([0 for _ in targets]).to(device)
 
         outputs = model(inputs)
         _, preds = torch.max(outputs, 1)
@@ -109,14 +100,12 @@ with torch.no_grad():
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
 
-        # Per-class accuracy
         for i, label in enumerate(labels.cpu().numpy()):
-            label_name = ["car", "bus", "pedestrian", "traffic_sign"][label]  
+            label_name = ["car", "bus", "pedestrian", "traffic_sign"][label]
             if preds[i] == label:
                 class_correct[label_name] += 1
             class_total[label_name] += 1
 
-# Overall accuracy
 overall_accuracy = accuracy_score(all_labels, all_preds)
 print(f"Overall Accuracy: {overall_accuracy * 100:.2f}%")
 
@@ -127,6 +116,19 @@ for class_name, correct in class_correct.items():
         print(f"Accuracy for {class_name}: {correct / total * 100:.2f}%")
     else:
         print(f"No samples for {class_name}")
+
+for class_index, class_name in enumerate(["car", "bus", "pedestrian", "traffic_sign"]):
+    class_preds = [1 if pred == class_index else 0 for pred in all_preds]
+    class_labels = [1 if label == class_index else 0 for label in all_labels]
+
+    prec = precision_score(class_labels, class_preds, zero_division=0)
+    rec = recall_score(class_labels, class_preds, zero_division=0)
+    f1 = f1_score(class_labels, class_preds, zero_division=0)
+
+    print(f"Metrics for {class_name}:")
+    print(f"  Precision: {prec:.4f}")
+    print(f"  Recall: {rec:.4f}")
+    print(f"  F1 Score: {f1:.4f}")
 
 
 torch.save(model.state_dict(), "object_detection_cnn.pth")
