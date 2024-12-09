@@ -1,0 +1,132 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
+from torchvision.datasets import VOCDetection
+from sklearn.metrics import accuracy_score
+
+
+class ObjectDetectionCNN(nn.Module):
+    def __init__(self):
+        super(ObjectDetectionCNN, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        self.fc1 = nn.Linear(128 * 8 * 8, 512) 
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(512, 4)  
+
+    def forward(self, x):
+        x = self.pool1(torch.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
+        x = self.pool3(torch.relu(self.bn3(self.conv3(x))))
+        x = x.view(x.size(0), -1)  # Flatten
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+
+
+def custom_collate_fn(batch):
+    inputs = [item[0] for item in batch]
+    targets = [item[1] for item in batch]
+    return torch.stack(inputs), targets
+
+
+transform = transforms.Compose([
+    transforms.Resize((64, 64)), 
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+
+dataset = VOCDetection(root='/snowy', year='2012', image_set='train', download=True, transform=transform)
+
+
+valid_data = []
+for data in dataset:
+    try:
+        if len(data[1]['annotation']['object']) > 0:  
+            valid_data.append(data)
+    except KeyError:
+        continue
+
+
+dataloader = DataLoader(valid_data, batch_size=32, shuffle=True, collate_fn=custom_collate_fn)
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = ObjectDetectionCNN().to(device)
+criterion = nn.CrossEntropyLoss()  
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+
+num_epochs = 10
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    for i, (inputs, targets) in enumerate(dataloader):
+        inputs = inputs.to(device)
+        labels = torch.tensor([0 for _ in targets]).to(device)  
+
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if i % 10 == 0:  
+            print(f"Epoch {epoch+1}/{num_epochs}, Batch {i+1}, Loss: {loss.item():.4f}")
+
+print("Training complete.")
+
+
+model.eval()
+all_preds = []
+all_labels = []
+class_correct = {"car": 0, "bus": 0, "pedestrian": 0, "traffic_sign": 0}
+class_total = {"car": 0, "bus": 0, "pedestrian": 0, "traffic_sign": 0}
+
+with torch.no_grad():
+    for inputs, targets in dataloader:
+        inputs = inputs.to(device)
+        labels = torch.tensor([0 for _ in targets]).to(device)  
+
+        outputs = model(inputs)
+        _, preds = torch.max(outputs, 1)
+
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+
+        # Per-class accuracy
+        for i, label in enumerate(labels.cpu().numpy()):
+            label_name = ["car", "bus", "pedestrian", "traffic_sign"][label]  
+            if preds[i] == label:
+                class_correct[label_name] += 1
+            class_total[label_name] += 1
+
+# Overall accuracy
+overall_accuracy = accuracy_score(all_labels, all_preds)
+print(f"Overall Accuracy: {overall_accuracy * 100:.2f}%")
+
+
+for class_name, correct in class_correct.items():
+    total = class_total[class_name]
+    if total > 0:
+        print(f"Accuracy for {class_name}: {correct / total * 100:.2f}%")
+    else:
+        print(f"No samples for {class_name}")
+
+
+torch.save(model.state_dict(), "object_detection_cnn.pth")
