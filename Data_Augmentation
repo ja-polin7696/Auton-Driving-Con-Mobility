@@ -1,0 +1,47 @@
+import os
+from PIL import Image, ImageEnhance
+import matplotlib.pyplot as plt
+from google.colab import drive
+
+
+drive.mount('/content/drive')
+
+
+def augment_image(image_path, output_folder):
+    try:
+ 
+        image = Image.open(image_path)
+
+    
+        rotated_image = image.rotate(92)  
+        enhancer = ImageEnhance.Color(image)
+        color_enhanced_image = enhancer.enhance(1.5)  
+        brightness_enhancer = ImageEnhance.Brightness(image)
+        bright_image = brightness_enhancer.enhance(1.2) 
+
+        
+        base_name = os.path.basename(image_path).split('.')[0]
+        rotated_image.save(os.path.join(output_folder, f"{base_name}_rotated.jpg"))
+        color_enhanced_image.save(os.path.join(output_folder, f"{base_name}_color_enhanced.jpg"))
+        bright_image.save(os.path.join(output_folder, f"{base_name}_bright.jpg"))
+
+        print(f"Augmented images saved for {image_path}")
+
+    except FileNotFoundError:
+        print(f"Error: File not found at {image_path}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+image_folder = "/content/sample_data/dataset_aug"  
+output_folder = "/content/sample_data/augmented_data"  
+
+os.makedirs(output_folder, exist_ok=True)
+
+
+for file_name in os.listdir(image_folder):
+    if file_name.lower().endswith(('.png', '.jpg', '.jpeg')): 
+        image_path = os.path.join(image_folder, file_name)
+        augment_image(image_path, output_folder)
+
+print(f"Augmentation complete. Check the output folder: {output_folder}")
