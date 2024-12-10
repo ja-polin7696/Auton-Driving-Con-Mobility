@@ -1,0 +1,87 @@
+
+model = YOLO('yolov8n.pt') 
+
+TARGET_CLASSES = ['bus', 'car', 'person', 'traffic sign']
+
+
+def filter_detections(results):
+    detections = []
+    for result in results:  # Iterate over each result
+        boxes = result.boxes.xyxy.cpu().numpy() 
+        confs = result.boxes.conf.cpu().numpy()  
+        classes = result.boxes.cls.cpu().numpy() 
+        names = [result.names[int(cls)] for cls in classes]  
+        for box, conf, cls_name in zip(boxes, confs, names):
+            if cls_name in TARGET_CLASSES:
+                detections.append({
+                    'xmin': box[0], 'ymin': box[1], 'xmax': box[2], 'ymax': box[3],
+                    'confidence': conf, 'name': cls_name
+                })
+    return pd.DataFrame(detections)
+
+
+def plot_results(image_path, detections):
+    img = Image.open(image_path).convert('RGB')
+    plt.figure(figsize=(12, 8))
+    plt.imshow(img)
+
+    for _, row in detections.iterrows():
+        x1, y1, x2, y2, conf, cls_name = (
+            row['xmin'], row['ymin'], row['xmax'], row['ymax'], row['confidence'], row['name']
+        )
+        plt.gca().add_patch(
+            plt.Rectangle((x1, y1), x2 - x1, y2 - y1, edgecolor='red', fill=False, linewidth=2)
+        )
+        plt.text(
+            x1, y1 - 5, f"{cls_name} {conf:.2f}",
+            color='red', fontsize=10, backgroundcolor='white'
+        )
+
+    plt.axis('off')
+    plt.show()
+
+
+def evaluate_accuracy(image_paths, ground_truth):
+    class_wise_counts = {cls: {'true_positive': 0, 'total_true': 0, 'total_pred': 0} for cls in TARGET_CLASSES}
+
+    for image_path in image_paths:
+        print(f"Processing {image_path}...")
+       
+        results = model.predict(str(image_path), save=False)
+       
+        detections = filter_detections(results)
+        
+        image_ground_truth = ground_truth.get(Path(image_path).name, [])
+        true_labels = [obj['name'] for obj in image_ground_truth]
+        pred_labels = detections['name'].tolist() if not detections.empty else []
+
+        for cls in TARGET_CLASSES:
+            class_wise_counts[cls]['total_true'] += true_labels.count(cls)
+            class_wise_counts[cls]['total_pred'] += pred_labels.count(cls)
+            class_wise_counts[cls]['true_positive'] += min(true_labels.count(cls), pred_labels.count(cls))
+
+ 
+    for cls, counts in class_wise_counts.items():
+        tp = counts['true_positive']
+        total_true = counts['total_true']
+        total_pred = counts['total_pred']
+        precision = tp / total_pred if total_pred > 0 else 0
+        recall = tp / total_true if total_true > 0 else 0
+        accuracy = tp / max(total_true, total_pred) if max(total_true, total_pred) > 0 else 0
+        print(f"Class: {cls}, Precision: {precision:.2f}, Recall: {recall:.2f}, Accuracy: {accuracy:.2f}")
+
+
+folder_path = '/content/dataset'  # Replace with your folder path
+ground_truth = {  # Replace with your ground truth data
+    'image1.jpg': [{'name': 'car'}, {'name': 'person'}],
+    'image2.jpg': [{'name': 'bus'}, {'name': 'traffic light'}]
+}
+
+image_paths = list(Path(folder_path).glob("*.jpg"))
+train_paths, test_paths = train_test_split(image_paths, test_size=0.2, random_state=42)
+
+print("Training Set Evaluation:")
+evaluate_accuracy(train_paths, ground_truth)
+
+print("\nTesting Set Evaluation:")
+evaluate_accuracy(test_paths, ground_truth)
