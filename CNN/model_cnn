@@ -1,0 +1,176 @@
+class ObjectDetectionCNN(nn.Module):
+    def __init__(self):
+        super(ObjectDetectionCNN, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.fc1 = nn.Linear(128 * 8 * 8, 512)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(512, 4)
+
+    def forward(self, x):
+        x = self.pool1(torch.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
+        x = self.pool3(torch.relu(self.bn3(self.conv3(x))))
+        x = x.view(x.size(0), -1)  # Flatten
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+
+
+
+def custom_collate_fn(batch):
+    inputs = []
+    targets = []
+    label_map = {'car': 0, 'bus': 1, 'pedestrian': 2, 'traffic_sign': 3}
+
+    for item in batch:
+        try:
+            
+            img = item[0]
+            label = item[1]['annotation']['object'][0]['name']
+            
+            
+            if label in label_map:
+                inputs.append(img)
+                targets.append(label_map[label])
+        except (KeyError, IndexError):
+            continue  
+
+    if len(inputs) > 0:
+        inputs = torch.stack(inputs)
+        targets = torch.tensor(targets)
+        return inputs, targets
+    else:
+        return None 
+
+
+transform = transforms.Compose([
+    transforms.Resize((64, 64)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+
+dataset = VOCDetection(root='/content/sample_data/dataset', year='2012', image_set='train', download=True, transform=transform)
+
+
+valid_data = []
+for data in dataset:
+    try:
+        if len(data[1]['annotation']['object']) > 0:
+            valid_data.append(data)
+    except KeyError:
+        continue
+
+train_size = int(0.8 * len(valid_data))
+test_size = len(valid_data) - train_size
+train_data, test_data = random_split(valid_data, [train_size, test_size])
+
+
+train_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=custom_collate_fn)
+test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=custom_collate_fn)
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = ObjectDetectionCNN().to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+
+num_epochs = 10
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    for i, batch in enumerate(train_loader):
+        if batch is None:
+            continue  
+
+        inputs, targets = batch
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(inputs)
+
+        if outputs.size(0) != targets.size(0):
+            continue  
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if i % 10 == 0:
+            print(f"Epoch {epoch+1}/{num_epochs}, Batch {i+1}, Loss: {loss.item():.4f}")
+
+print("Training complete.")
+
+
+model.eval()
+all_preds = []
+all_labels = []
+
+label_map = {0: "car", 1: "bus", 2: "pedestrian", 3: "traffic_sign"}
+class_correct = {label: 0 for label in label_map.values()}
+class_total = {label: 0 for label in label_map.values()}
+
+with torch.no_grad():
+    for batch in test_loader:
+        if batch is None:
+            continue  
+
+        inputs, targets = batch
+        inputs, targets = inputs.to(device), targets.to(device)
+        outputs = model(inputs)
+        _, preds = torch.max(outputs, 1)
+
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(targets.cpu().numpy())
+
+        
+        for i, label in enumerate(targets.cpu().numpy()):
+            label_name = label_map[label]
+            if preds[i] == label:
+                class_correct[label_name] += 1
+            class_total[label_name] += 1
+
+
+all_preds = np.array(all_preds)
+all_labels = np.array(all_labels)
+
+
+print("\nClassification Report:")
+report = classification_report(
+    all_labels,
+    all_preds,
+    labels=list(label_map.keys()),  
+    target_names=list(label_map.values()),  
+    digits=2,
+    zero_division=0  
+)
+print(report)
+
+
+print("\nPer-Class Accuracy:")
+for class_name, correct in class_correct.items():
+    total = class_total[class_name]
+    if total > 0:
+        print(f"Accuracy for {class_name}: {correct / total * 100:.2f}%")
+    else:
+        print(f"No samples for {class_name}")
+
+
+overall_accuracy = accuracy_score(all_labels, all_preds)
+print(f"\nOverall Accuracy: {overall_accuracy * 100:.2f}%")
+
+
+torch.save(model.state_dict(), "object_detection_cnn.pth")
