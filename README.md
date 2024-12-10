@@ -2,3 +2,6 @@
 
 ## Contributor
 Johora Akter Polin
+
+## Presentation Slide
+ [Google Drive Link](https://docs.google.com/presentation/d/1UAYFVFIVexMhfq2olGOdaPGh74cRWb4K/edit?usp=drive_link&ouid=102809837703575296131&rtpof=true&sd=true)
