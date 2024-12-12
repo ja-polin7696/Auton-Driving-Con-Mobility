@@ -39,7 +39,7 @@ def plot_results(image_path, detections):
     plt.show()
 
 
-image_path = '/content/6cf7a093-0f0b61f6.jpg'  # Replace with your image file path
+image_path = '/content/6cf7a093-0f0b61f6.jpg'
 
 
 results = model.predict(image_path, save=False)
