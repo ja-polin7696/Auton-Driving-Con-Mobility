@@ -1,6 +1,6 @@
 # Project Title: Impact of Weather on Autonomous Vehicle Safety: A Risk Assessment Approach
 
-![Autonomous Vehicle]([assets/download.jpg](https://github.com/ja-polin7696/Auton-Driving-Con-Mobility/blob/main/download.jpg))
+![Autonomous Vehicle]((assets/download.jpg](https://github.com/ja-polin7696/Auton-Driving-Con-Mobility/blob/main/download.jpg))
 
 ## Contributor
 Johora Akter Polin
